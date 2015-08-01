@@ -28,7 +28,6 @@ executable whendidc9lastthrow
                        directory,
                        taggy,
                        taggy-lens,
-                       containers,
                        lens-aeson
   -- hs-source-dirs:      
   default-language:    Haskell2010

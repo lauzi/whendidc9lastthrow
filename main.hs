@@ -6,11 +6,9 @@ import DotaParser
 import Control.Lens
 import Control.Monad
 
-import Data.Ord (comparing)
-import Data.List (sortBy)
+import Data.List (sortOn)
 
-import qualified Data.Set as S
-import Data.Functor ((<$>))
+import qualified Data.HashSet as S
 
 import Data.Time
 
@@ -90,9 +88,6 @@ reallyPrintThrow lastThrow = do
 
   printf "They threw away a %d gold lead.\n" $ lastThrow ^. winnerAdvantage . to minimum . to negate
 
-
-sortOn :: Ord b => (a -> b) -> [a] -> [a]
-sortOn f = sortBy (comparing f)
 
 getMatches :: IO [Match]
 getMatches = do
