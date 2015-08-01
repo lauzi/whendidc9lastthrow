@@ -33,3 +33,5 @@ TAGS
 dist/*
 *.cache
 *.exe
+
+*.html
