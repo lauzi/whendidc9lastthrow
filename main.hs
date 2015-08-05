@@ -63,25 +63,34 @@ getMatches = do
 
 
 main :: IO ()
-main = genHtml
+main = case 1 of
+  1 -> printMatches
+  2 -> genHtml
 
 
 printMatches :: IO ()
 printMatches = do
+  timezone <- getCurrentTimeZone
   matches <- getMatches
-  forM_ matches $ \md -> printMatchInfo md >> putStrLn (replicate 40 '-')
+  forM_ matches $ \md -> printMatchInfo timezone md >> putStrLn (replicate 40 '-')
   printLastThrow matches
 
-printMatchInfo :: Match -> IO ()
-printMatchInfo md = do
-    let match = md ^. matchId
-        teams = md ^. matchTeams
-    printf "Match %s: \n" match
-    printf "Time: %s\n" $ md ^. matchTime . to show
-    printf "Winner: %s (%s)\n" (teams ^. winnerDotabuff . teamName) (teams ^. winner . to show)
-    let gs = md ^. winnerAdvantage
-    printf "Winner advantage: [%6d, %6d]\n" (minimum gs) (maximum gs)
-    printf "It was %sa throw.\n" $ if isThrow md then "" else "not " :: String
+matchInfo :: TimeZone -> Match -> [String]
+matchInfo timeZone md = content
+    where match = md ^. matchId
+          teams = md ^. matchTeams
+          gs = md ^. winnerAdvantage
+
+          content = [
+              printf "Match %s: " match
+            , printf "Time: %s (%s)" $ md ^. matchTime . to (utcToLocalTime timeZone) . to show
+            , printf "Winner: %s (%s)" (teams ^. winnerDotabuff . teamName) (teams ^. winner . to show)
+            , printf "Winner advantage: [%6d, %6d]" (minimum gs) (maximum gs)
+            , printf "It was %sa throw." $ if isThrow md then "" else "not " :: String
+            ] :: [String]
+
+printMatchInfo :: TimeZone -> Match -> IO ()
+printMatchInfo timeZone = mapM_ putStrLn . matchInfo timeZone
 
 showThings :: String -> String -> Int -> String
 showThings sing _ 1 = "1 " ++ sing
@@ -96,9 +105,8 @@ printLastThrow matches =
 reallyPrintLastThrow :: Match -> IO ()
 reallyPrintLastThrow lastThrow = do
   now <- getCurrentTime
-  timezone <- getCurrentTimeZone
 
-  let throwTime = lastThrow ^. matchTime . to (localTimeToUTC timezone)
+  let throwTime = lastThrow ^. matchTime
       diffHours = fromEnum $ diffUTCTime now throwTime / (3600 * 1e12) :: Int
       (days, hours) = diffHours `divMod` 24
 
@@ -112,25 +120,21 @@ reallyPrintLastThrow lastThrow = do
 genHtml :: IO ()
 genHtml = do
   matches <- getMatches
-  writeFile "c9.html" . renderHtml . htmlMatches $ matches
+  timeZone <- getCurrentTimeZone
+  writeFile "c9.html" . renderHtml . htmlMatches timeZone $ matches
 
-htmlMatches :: [Match] -> Html
-htmlMatches matches = docTypeHtml $ do
-  H.head $ H.title "When did Cloud 9 last throw"
-  body $ do
+htmlMatches :: TimeZone -> [Match] -> Html
+htmlMatches timeZone matches = docTypeHtml $ do
+  H.head $ do
+    meta ! charset "utf-8"
+    H.title "When did Cloud 9 last throw"
+    link ! rel "stylesheet" ! href "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css"
+    link ! rel "stylesheet" ! href "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap-theme.min.css"
+
+  body $ H.div ! class_ "container" $ do
     h1 "When did Cloud 9 last throw"
-    ol $ forM_ (reverse matches) (li . p . htmlMatch)
+    ol $ forM_ (reverse matches) (li . p . htmlMatch timeZone)
+    script ! src "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js" $ return ()
 
-htmlMatch :: Match -> Html
-htmlMatch md = sequence_ . intersperse br $ toHtml <$> content
-    where match = md ^. matchId
-          teams = md ^. matchTeams
-          gs = md ^. winnerAdvantage
-
-          content = [
-              printf "Match %s: " match
-            , printf "Time: %s" $ md ^. matchTime . to show
-            , printf "Winner: %s (%s)" (teams ^. winnerDotabuff . teamName) (teams ^. winner . to show)
-            , printf "Winner advantage: [%6d, %6d]" (minimum gs) (maximum gs)
-            , printf "It was %sa throw." $ if isThrow md then "" else "not " :: String
-            ] :: [String]
+htmlMatch :: TimeZone -> Match -> Html
+htmlMatch timeZone = sequence_ . intersperse br . fmap toHtml . matchInfo timeZone

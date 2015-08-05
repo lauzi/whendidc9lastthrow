@@ -6,7 +6,7 @@ module Dota where
 
 import Control.Lens
 
-import Data.Time (LocalTime)
+import Data.Time (UTCTime)
 
 type MatchId = String
 type URL = String
@@ -45,7 +45,7 @@ winnerDotabuff, loserDotabuff :: Lens' MatchTeams TeamDotabuff
 winnerDotabuff = flatmapLens' (winner . to matchTeam)
 loserDotabuff = flatmapLens' (winner . to opponent . to matchTeam)
 
-type MatchTime = LocalTime
+type MatchTime = UTCTime
 type GoldDifference = Integer
 
 data Match = Match { _matchId :: MatchId
