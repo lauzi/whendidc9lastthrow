@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
@@ -7,6 +8,7 @@ import DotaParser
 
 import Control.Lens
 import Control.Monad
+import Control.Monad.Reader
 
 import Data.List (sortOn, intersperse)
 
@@ -62,11 +64,12 @@ getMatches = do
   return $ sortOn (^. matchTime) matches
 
 
-main :: IO ()
-main = case 1 of
-  1 -> printMatches
-  2 -> genHtml
+data MetaData = MetaData { _localTimeZone :: TimeZone }
+makeLenses ''MetaData
 
+type Jizz = Reader MetaData
+runJizz :: TimeZone -> Jizz a -> a
+runJizz tz = flip runReader (MetaData tz)
 
 printMatches :: IO ()
 printMatches = do
@@ -75,22 +78,23 @@ printMatches = do
   forM_ matches $ \md -> printMatchInfo timezone md >> putStrLn (replicate 40 '-')
   printLastThrow matches
 
-matchInfo :: TimeZone -> Match -> [String]
-matchInfo timeZone md = content
-    where match = md ^. matchId
-          teams = md ^. matchTeams
-          gs = md ^. winnerAdvantage
+matchInfo :: Match -> Jizz [String]
+matchInfo md = do
+  toLocalTime <- views localTimeZone (to . utcToLocalTime)
 
-          content = [
-              printf "Match %s: " match
-            , printf "Time: %s (%s)" $ md ^. matchTime . to (utcToLocalTime timeZone) . to show
-            , printf "Winner: %s (%s)" (teams ^. winnerDotabuff . teamName) (teams ^. winner . to show)
-            , printf "Winner advantage: [%6d, %6d]" (minimum gs) (maximum gs)
-            , printf "It was %sa throw." $ if isThrow md then "" else "not " :: String
-            ] :: [String]
+  let match = md ^. matchId
+      teams = md ^. matchTeams
+      gs = md ^. winnerAdvantage
 
-printMatchInfo :: TimeZone -> Match -> IO ()
-printMatchInfo timeZone = mapM_ putStrLn . matchInfo timeZone
+  return [ printf "Match %s: " match
+         , printf "Time: %s" $ md ^. matchTime . toLocalTime . to show
+         , printf "Winner: %s (%s)" (teams ^. winnerDotabuff . teamName) (teams ^. winner . to show)
+         , printf "Winner advantage: [%6d, %6d]" (minimum gs) (maximum gs)
+         , printf "It was %sa throw." $ if isThrow md then "" else "not " :: String
+         ]
+
+printMatchInfo :: Match -> Jizz (IO ())
+printMatchInfo m = mapM_ putStrLn <$> matchInfo m
 
 showThings :: String -> String -> Int -> String
 showThings sing _ 1 = "1 " ++ sing
@@ -123,18 +127,29 @@ genHtml = do
   timeZone <- getCurrentTimeZone
   writeFile "c9.html" . renderHtml . htmlMatches timeZone $ matches
 
-htmlMatches :: TimeZone -> [Match] -> Html
-htmlMatches timeZone matches = docTypeHtml $ do
-  H.head $ do
-    meta ! charset "utf-8"
-    H.title "When did Cloud 9 last throw"
-    link ! rel "stylesheet" ! href "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css"
-    link ! rel "stylesheet" ! href "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap-theme.min.css"
+htmlMatches :: [Match] -> Jizz Html
+htmlMatches matches = docTypeHtml <$> do
+  timeZone <- view localTimeZone
+  let css url = link ! rel "stylesheet" ! href url
 
-  body $ H.div ! class_ "container" $ do
-    h1 "When did Cloud 9 last throw"
-    ol $ forM_ (reverse matches) (li . p . htmlMatch timeZone)
-    script ! src "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js" $ return ()
+  htmls <- mapM (fmap (li . p) . htmlMatch) $ reverse matches
+  return $ do
+    H.head $ do
+      meta ! charset "utf-8"
+      H.title "When did Cloud 9 last throw"
+      css "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css"
+      css "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap-theme.min.css"
 
-htmlMatch :: TimeZone -> Match -> Html
-htmlMatch timeZone = sequence_ . intersperse br . fmap toHtml . matchInfo timeZone
+    body $ H.div ! class_ "container" $ do
+      h1 "When did Cloud 9 last throw"
+      ol htmls
+      script ! src "https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js" $ return ()
+
+htmlMatch :: Match -> Jizz Html
+htmlMatch m = sequence_ . intersperse br . fmap toHtml <$> matchInfo m
+
+
+main :: IO ()
+main = case 1 of
+  1 -> printMatches
+  2 -> genHtml
